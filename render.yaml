@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: remote-maintenance
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: VIDEO_BACKEND
+        value: local
+      - key: DATABASE_PATH
+        value: data/maintenance.db
+      - key: TRACKER_ALGO
+        value: csrt
