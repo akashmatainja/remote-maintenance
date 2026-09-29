@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Room {{ room }}{% endblock %}
+{% block body_class %}tech{% endblock %}
+{% block head %}{% if video_backend == "jitsi" %}<script src="https://{{ jitsi_domain }}/libs/lib-jitsi-meet.min.js"></script>{% endif %}{% endblock %}
+{% block body %}
+<div class="tech-wrap">
+  <div class="stage" id="stage">
+    <video id="local-video" autoplay playsinline muted></video>
+    <div class="tech-top"><span id="expert-name">Waiting for expert</span><span id="status">Connecting</span></div>
+    <div class="guide" id="guide" aria-live="polite"></div>
+    <div class="stage-empty problem" id="problem" role="alert" hidden></div>
+  </div>
+  <div class="tech-bar">
+    <button id="mute" aria-pressed="false">Mute</button>
+    <button id="flip">Flip camera</button>
+    <select id="camera" aria-label="Camera" hidden></select>
+    <button id="leave" class="leave">Leave</button>
+  </div>
+</div>
+<script>window.RC = {{ {"room": room, "role": role, "name": name, "mode": mode} | tojson }};</script>
+<script type="module" src="{{ url_for('static', path='js/technician.js') }}"></script>
+{% endblock %}

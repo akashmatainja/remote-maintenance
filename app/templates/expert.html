@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Room {{ room }}{% endblock %}
+{% block head %}{% if video_backend == "jitsi" %}<script src="https://{{ jitsi_domain }}/libs/lib-jitsi-meet.min.js"></script>{% endif %}{% endblock %}
+{% block content %}
+<div class="rc-grid">
+  <section aria-label="Live video">
+    <div class="toolbar" role="toolbar" aria-label="Annotation tools">
+      <div class="group">
+        <button class="tool" data-tool="ring" aria-pressed="true" title="Drag around a part">Circle</button>
+        <button class="tool" data-tool="box" aria-pressed="false">Box</button>
+        <button class="tool" data-tool="arrow" aria-pressed="false" title="Drag from label spot to the part">Arrow + label</button>
+        <button class="tool" data-tool="text" aria-pressed="false" title="Click a part, type a note">Text</button>
+        <button class="tool" data-tool="pen" aria-pressed="false">Pen</button>
+        <button class="tool" data-tool="move" aria-pressed="false" title="Drag a mark onto the part again">Move</button>
+        <button class="tool" data-tool="erase" aria-pressed="false">Erase</button>
+      </div>
+      <div class="group">
+        <button class="swatch" data-color="#f0a534" aria-pressed="true" aria-label="Amber" style="background:#f0a534"></button>
+        <button class="swatch" data-color="#1fc3ac" aria-pressed="false" aria-label="Teal" style="background:#1fc3ac"></button>
+        <button class="swatch" data-color="#e5534b" aria-pressed="false" aria-label="Red" style="background:#e5534b"></button>
+        <button class="swatch" data-color="#ffffff" aria-pressed="false" aria-label="White" style="background:#ffffff"></button>
+      </div>
+      <div class="group">
+        <label class="toggle"><input type="checkbox" id="follow" checked> Follow object</label>
+      </div>
+      <div class="group" hidden>
+        <label class="toggle">Camera <select id="source" class="source-select"></select></label>
+      </div>
+      <div class="group">
+        <button class="tool" id="undo" title="Ctrl+Z">Undo</button>
+        <button class="tool" id="clear">Clear all</button>
+      </div>
+    </div>
+
+    <div class="stage" id="stage">
+      <video id="remote-video" autoplay playsinline muted></video>
+      <div class="stage-empty" id="stage-empty"><div><strong>Waiting for the technician's camera</strong>Send them the link with "Copy technician link" below.</div></div>
+      <span class="badge-live idle" id="live">Connecting</span>
+      <span class="timer" id="timer">00:00:00</span>
+      <div class="caption"><span>Expert: {{ name }}</span><span id="cap-tech">Technician: waiting</span><span id="cap-quality">-</span></div>
+    </div>
+  </section>
+
+  <aside class="panel" aria-label="Camera control">
+    <h2>PTZ control</h2>
+    <div class="dpad">
+      <button class="up" data-move="up" aria-label="Tilt up">&#9650;</button>
+      <button class="left" data-move="left" aria-label="Pan left">&#9664;</button>
+      <button class="home" id="ptz-home" aria-label="Home position">&#8962;</button>
+      <button class="right" data-move="right" aria-label="Pan right">&#9654;</button>
+      <button class="down" data-move="down" aria-label="Tilt down">&#9660;</button>
+    </div>
+    <h3><label for="zoom">Zoom</label></h3>
+    <input type="range" id="zoom" class="zoom" min="0" max="100" value="0">
+    <h3>Presets</h3>
+    <div class="presets">
+      {% for p in (presets or ["Gearbox", "Panel A", "Inlet", "Wide"]) %}
+        <button data-preset="{{ p }}">{{ p }}</button>
+      {% endfor %}
+    </div>
+    {% if mode == "handheld" %}
+      <p class="hint">Handheld camera: these buttons show directions on the technician's screen. Zoom uses the phone's camera zoom where supported.</p>
+    {% endif %}
+    <div class="call-actions">
+      <button class="btn-mute" id="mute" aria-pressed="false">Mute</button>
+      <button class="btn-record" id="record" aria-pressed="false">Record</button>
+      <button class="btn-end" id="end">End</button>
+    </div>
+  </aside>
+</div>
+
+<dl class="statsbar">
+  <div><dt>Connection</dt><dd id="stat-conn">-</dd></div>
+  <div><dt>Latency</dt><dd id="stat-latency">-</dd></div>
+  <div><dt>Bitrate</dt><dd id="stat-bitrate">-</dd></div>
+  <div><dt>Packet loss</dt><dd id="stat-loss">-</dd></div>
+  <div><dt>Room</dt><dd id="stat-room">{{ room }}</dd></div>
+  <button class="btn-link" id="copy-link">Copy technician link</button>
+</dl>
+<div class="toast" id="toast" role="status"></div>
+
+<script>window.RC = {{ {"room": room, "role": role, "name": name, "mode": mode, "presets": presets} | tojson }};</script>
+<script type="module" src="{{ url_for('static', path='js/expert.js') }}"></script>
+{% endblock %}

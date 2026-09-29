@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="page-title">Start a remote session</h2>
+<div class="cards">
+  <form class="panel" id="start-form">
+    <h2>New session (expert)</h2>
+    <div class="form-row"><label for="exp-name">Your name</label><input id="exp-name" required placeholder="R. Banerjee"></div>
+    <div class="form-row"><label for="exp-room">Room code</label><input id="exp-room" placeholder="Leave empty to create one"></div>
+    <button class="btn-primary" type="submit">Start session</button>
+    <p class="hint">You will get a link to send to the technician.</p>
+  </form>
+  <form class="panel" id="join-form">
+    <h2>Join (technician)</h2>
+    <div class="form-row"><label for="tech-name">Your name or device</label><input id="tech-name" required placeholder="Line-4 Handheld"></div>
+    <div class="form-row"><label for="tech-room">Room code</label><input id="tech-room" required placeholder="7K42QX"></div>
+    <button class="btn-primary" type="submit">Join with camera</button>
+  </form>
+</div>
+
+<h2 class="page-title">Recent sessions</h2>
+{% include "_sessions_table.html" %}
+
+<script>
+const go = (room, role, name) => location.href = `/remote-camera?${new URLSearchParams({room, role, name})}`;
+document.getElementById("start-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  let room = document.getElementById("exp-room").value.trim();
+  if (!room) room = (await (await fetch("/api/rooms", {method: "POST"})).json()).room;
+  go(room, "expert", document.getElementById("exp-name").value.trim());
+});
+document.getElementById("join-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  go(document.getElementById("tech-room").value.trim(), "technician", document.getElementById("tech-name").value.trim());
+});
+</script>
+{% endblock %}

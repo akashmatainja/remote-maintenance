@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}{{ active }}{% endblock %} | Remote Maintenance</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+{% block body %}
+<div class="shell">
+  <aside class="sidebar">
+    <h1>Maintenance</h1>
+    <nav>
+      {% for label, href in nav %}
+        <a href="{{ href }}" class="{{ 'active' if label == active else '' }}"{% if label == active %} aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
+  </aside>
+  <main class="main">{% block content %}{% endblock %}</main>
+</div>
+{% endblock %}
+</body>
+</html>

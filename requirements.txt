@@ -1,0 +1,11 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+jinja2>=3.1
+python-dotenv>=1.0
+pyjwt>=2.8
+cryptography>=41  # only for scripts/run_https.py (local HTTPS testing)
+numpy>=1.26
+# CSRT/KCF trackers live in the contrib build. Do not install opencv-python alongside it.
+opencv-contrib-python-headless>=4.8
+# Optional: only needed for real ONVIF PTZ cameras
+onvif-zeep>=0.2.12

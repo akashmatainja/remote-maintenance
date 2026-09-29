@@ -1,0 +1,16 @@
+{
+  "_comment": "Copy to cameras.json. Maps a room code to an ONVIF PTZ camera. Rooms not listed here use handheld mode.",
+  "7K42QX": {
+    "host": "192.168.1.64",
+    "port": 80,
+    "user": "admin",
+    "password": "camera-password",
+    "rtsp_url": "rtsp://admin:camera-password@192.168.1.64:554/Streaming/Channels/101",
+    "presets": {
+      "Gearbox": "1",
+      "Panel A": "2",
+      "Inlet": "3",
+      "Wide": "4"
+    }
+  }
+}

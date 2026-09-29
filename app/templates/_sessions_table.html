@@ -1,0 +1,21 @@
+{% if sessions %}
+<table class="list">
+  <thead><tr><th>Room</th><th>Expert</th><th>Technician</th><th>Started</th><th>Duration</th><th>Marks</th><th></th></tr></thead>
+  <tbody>
+  {% for s in sessions %}
+    <tr>
+      <td>{{ s.room }}</td>
+      <td>{{ s.expert or "-" }}</td>
+      <td>{{ s.technician or "-" }}</td>
+      <td class="started" data-ts="{{ s.started_at }}"></td>
+      <td>{% if s.ended_at %}{{ ((s.ended_at - s.started_at) / 60) | round(1) }} min{% else %}<strong>Live</strong>{% endif %}</td>
+      <td>{{ s.marks }}</td>
+      <td>{% if not s.ended_at %}<a href="/remote-camera?room={{ s.room }}&role=expert">Rejoin</a>{% else %}<a href="/sessions/{{ s.id }}">Details</a>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<script>document.querySelectorAll(".started").forEach(td => td.textContent = new Date(td.dataset.ts * 1000).toLocaleString());</script>
+{% else %}
+<p class="muted">No sessions yet. Start one above and it will be listed here.</p>
+{% endif %}
