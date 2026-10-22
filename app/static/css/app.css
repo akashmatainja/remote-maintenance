@@ -163,3 +163,30 @@ table.list th { font-size: 12px; color: var(--ink-soft); font-weight: 600; backg
 .tool-del { position: absolute; top: -7px; right: -7px; width: 20px; height: 20px; border-radius: 50%; border: 0; background: var(--slate); color: #fff; font-size: 14px; line-height: 1; cursor: pointer; opacity: 0; }
 .tool-item:hover .tool-del, .tool-item:focus-within .tool-del { opacity: 1; }
 .tooltray-hint { font-size: 12.5px; color: var(--ink-soft); margin: 6px 0 0; }
+
+/* ---------- 3D tools layer ---------- */
+.stage canvas.overlay3d { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.tool-item.is-model .tool-place { background: linear-gradient(#f4f7fa, #e3e9ef); }
+
+/* ---------- in-app dialogs and messages (replace browser alerts) ---------- */
+.app-dialog { border: 0; border-radius: 10px; padding: 22px 22px 18px; width: min(440px, calc(100vw - 32px)); color: var(--ink); box-shadow: 0 18px 50px rgba(10, 20, 35, 0.35); }
+.app-dialog::backdrop { background: rgba(15, 25, 40, 0.55); }
+.app-dialog h2 { margin: 0 0 8px; font-size: 18px; }
+.app-dialog p { margin: 0 0 16px; color: var(--ink-soft); }
+.dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.dlg-btn { border: 1px solid var(--line); background: #fff; color: var(--ink); padding: 8px 16px; border-radius: 4px; font-weight: 600; cursor: pointer; }
+.dlg-primary { background: var(--teal); border-color: var(--teal); color: #fff; }
+.dlg-danger { background: var(--red); border-color: var(--red); color: #fff; }
+.dlg-link { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; margin-bottom: 14px; font-size: 13px; }
+.toast[data-kind="error"] { background: #a93733; }
+.toast[data-kind="success"] { background: var(--teal-dark); }
+.toast { max-width: calc(100vw - 32px); text-align: center; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3); }
+.field-error { margin: 2px 0 0; color: #b0302b; font-size: 13px; }
+.form-row input[aria-invalid="true"] { border-color: #b0302b; }
+.notice { max-width: 900px; padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; }
+.notice-error { background: #fbe9e8; border: 1px solid #f0b8b5; color: #8c2420; }
+.ended-screen { min-height: 100vh; display: grid; place-content: center; padding: 24px; background: var(--stage); }
+.ended-card { background: #fff; color: var(--ink); border-radius: 12px; padding: 28px 24px; text-align: center; max-width: 360px; }
+.ended-card h1 { font-size: 20px; margin: 8px 0 6px; }
+.ended-card p { color: var(--ink-soft); margin: 0 0 18px; }
+.ended-icon { width: 48px; height: 48px; border-radius: 50%; background: var(--teal); color: #fff; font-size: 26px; display: grid; place-content: center; margin: 0 auto; }

@@ -2,6 +2,7 @@ import { RoomSocket } from "./room-socket.js";
 import { LocalSession } from "./local-webrtc.js";
 import { JitsiSession } from "./jitsi-client.js";
 import { AnnotationLayer } from "./annotations.js";
+import { toast } from "./ui.js";
 import { attachAudio, detachAudio, onAudioBlocked, unlockAudio } from "./audio.js";
 
 const RC = window.RC;
@@ -16,6 +17,7 @@ const layer = new AnnotationLayer({
   filter: (a) => !a.source || a.source === RC.name,
 });
 
+if (new URLSearchParams(location.search).has("debug")) window.__layer = layer; // tests only
 socket
   .on("state", (m) => { layer.setAll(m.annotations); (m.media || []).forEach(setMedia); peers(m.peers); })
   .on("media", (m) => setMedia(m))
@@ -46,6 +48,7 @@ function setMedia(m) {
 }
 
 function refreshExpertMedia() {
+  if (!$("#expert-mic")) return; // session ended screen is showing
   const micOff = experts.length > 0 && experts.every((n) => media.has(n) && !media.get(n).mic);
   $("#expert-mic").hidden = !micOff;
 
@@ -153,14 +156,20 @@ async function fillCameraList() {
   sel.hidden = cams.length < 2;
 }
 
-$("#camera").addEventListener("change", async (e) => {
-  await session.switchCamera({ cameraDeviceId: e.target.value });
-  showLocal();
-});
-$("#flip").addEventListener("click", async () => {
+async function switchCam(opts) {
+  try {
+    await session.switchCamera(opts);
+    showLocal();
+  } catch (err) {
+    toast(err?.name === "NotReadableError"
+      ? "That camera is busy. Close other apps using it and try again."
+      : "Couldn't switch camera. Try again, or reload the page.", "error");
+  }
+}
+$("#camera").addEventListener("change", (e) => switchCam({ cameraDeviceId: e.target.value }));
+$("#flip").addEventListener("click", () => {
   facing = facing === "environment" ? "user" : "environment";
-  await session.switchCamera({ facingMode: facing });
-  showLocal();
+  switchCam({ facingMode: facing });
 });
 $("#mute").addEventListener("click", async (e) => {
   const muted = await session?.toggleMute();
@@ -172,7 +181,15 @@ $("#leave").addEventListener("click", () => end("You left the session."));
 async function end(message) {
   await session?.leave();
   socket.close();
-  document.body.innerHTML = `<div style="color:#fff;display:grid;place-content:center;height:100vh;text-align:center;font-family:sans-serif;padding:24px"><p style="font-size:20px">${message}</p></div>`;
+  document.body.innerHTML = `<main class="ended-screen" role="status">
+    <div class="ended-card">
+      <div class="ended-icon" aria-hidden="true">&#10003;</div>
+      <h1>Session ended</h1>
+      <p></p>
+      <button type="button" class="btn-primary" id="rejoin">Rejoin</button>
+    </div></main>`;
+  document.querySelector(".ended-card p").textContent = message;
+  document.getElementById("rejoin").onclick = () => location.reload();
 }
 
 function problem(title, body) {

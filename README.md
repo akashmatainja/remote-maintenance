@@ -143,14 +143,19 @@ location /ws/ {
   browser blocks sound, the technician gets a **Tap to hear the expert** button.
 - **Camera:** **Camera** in the PTZ panel turns the expert's webcam on. The technician sees it
   as a thumbnail (tap it to move it to the other side); the expert sees a self-view.
-- **Tool images:** **Upload image** under the video adds PNG/WebP/JPEG/GIF files
-  (scaled to 512 px) as *session tools*: the image is processed in the expert's
-  browser and embedded in the mark itself, so the technician renders it without
-  the server storing anything — they vanish on reload. Transparent PNGs look
-  best. Drag a tool onto the video or click it to place it in the centre; scroll
-  over it to resize, Shift+scroll to rotate. With **Follow object** on, the tool
-  sticks to the part underneath it. If `TOOLS_DIR` points at a persistent disk,
-  images saved there still load from `/api/tools` alongside session tools.
+- **Tools (images and 3D models):** **Upload image** under the video adds PNG/WebP/JPEG/GIF
+  files (max 5 MB, scaled to 512 px) or `.glb` 3D models (max 15 MB) to a shared tool library.
+  Drag a tool onto the video or click it. Click a placed tool to select it, then drag it to
+  move, drag the corner square to resize, the spin handle to rotate, and the **3D** handle to
+  turn it in any direction, 360° (double-click the 3D handle to reset). Images turn like a
+  card; `.glb` models show every side. The technician sees every change live. Tools stay
+  where you put them (no object tracking). Free `.glb` tool models are on sites like
+  Poly Pizza or Sketchfab (check each model's licence). three.js r170 (MIT) is bundled in
+  `app/static/vendor`.
+- **Uploads are for the current meeting only.** They are kept in the server's memory (never
+  written to disk) and deleted when the expert ends the meeting. If everyone drops off without
+  ending it, they are kept for 60 seconds so a reconnect doesn't lose them. Limits: 30 tools
+  or 60 MB per meeting.
 
 ## Cameras: handheld and PTZ
 

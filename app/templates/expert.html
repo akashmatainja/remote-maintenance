@@ -42,12 +42,12 @@
 
     <div class="tooltray" aria-label="Tool images">
       <span class="tooltray-title">Tools</span>
-      <div class="tooltray-items" id="tool-items"><span class="muted">No tool images yet. Upload a PNG with a transparent background.</span></div>
+      <div class="tooltray-items" id="tool-items"><span class="muted">No tools in this meeting yet. Upload a transparent PNG or a .glb 3D model.</span></div>
       <label class="btn-link tooltray-upload">Upload image
-        <input type="file" id="tool-upload" accept="image/png,image/webp,image/gif,image/jpeg" multiple hidden>
+        <input type="file" id="tool-upload" accept="image/png,image/webp,image/gif,image/jpeg,.glb,model/gltf-binary" multiple hidden>
       </label>
     </div>
-    <p class="tooltray-hint">Drag a tool onto the video, or click it to place it in the centre. Over a placed tool: scroll to resize, Shift+scroll to rotate. Use Move to reposition and Erase to remove.</p>
+    <p class="tooltray-hint">Drag a tool onto the video, or click it to place it. Click a placed tool to select it: drag it to move, drag the corner square to resize, the &#8635; handle to spin, and the <strong>3D</strong> handle to turn it in any direction (double-click it to reset). Delete key removes it. Tools stay where you put them; circles and arrows follow objects. Uploads are only kept for this meeting and are deleted when it ends.</p>
   </section>
 
   <aside class="panel" aria-label="Camera control">

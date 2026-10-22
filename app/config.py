@@ -25,8 +25,6 @@ class Settings:
     jitsi_app_secret: str = os.getenv("JITSI_APP_SECRET", "")
 
     database_path: Path = BASE_DIR / os.getenv("DATABASE_PATH", "data/maintenance.db")
-    # Uploaded tool images (wrench, screwdriver...). Point this at a persistent disk in production.
-    tools_dir: Path = BASE_DIR / os.getenv("TOOLS_DIR", "data/tools")
     cameras_file: Path = BASE_DIR / os.getenv("CAMERAS_FILE", "cameras.json")
 
     tracker_algo: str = os.getenv("TRACKER_ALGO", "csrt").lower()

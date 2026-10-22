@@ -65,6 +65,13 @@ class Room:
     frame_source: Peer | None = None
     meta: dict = field(default_factory=dict)
     media: dict = field(default_factory=dict)  # expert name -> {cam, mic}
+    tools: dict = field(default_factory=dict)  # tool id -> processed upload (in memory, this meeting only)
+    ended: bool = False
+    cleanup: asyncio.Task | None = None
+
+    def tool_list(self) -> list[dict]:
+        return [{k: v for k, v in t.items() if k != "data"} | {"url": f"/room-tools/{self.code}/{t['id']}.{t['ext']}"}
+                for t in self.tools.values()]
 
     def roster(self) -> list[dict]:
         return [{"name": p.name, "role": p.role} for p in self.peers]
@@ -75,15 +82,64 @@ class Room:
         )
 
 
+# How long an empty room (and its marks and tools) survives, so a dropped connection
+# can rejoin without losing anything. Ending the meeting clears it immediately.
+EMPTY_ROOM_GRACE_S = 60
+
+
 class Hub:
     def __init__(self):
         self.rooms: dict[str, Room] = {}
 
     def room(self, code: str) -> Room:
         code = code.upper()
-        if code not in self.rooms:
-            self.rooms[code] = Room(code=code, session_id=db.open_session(code))
-        return self.rooms[code]
+        room = self.rooms.get(code)
+        if room and room.ended and not room.peers:
+            self._close(room)
+            room = None
+        if room is None:
+            room = self.rooms[code] = Room(code=code, session_id=db.open_session(code))
+        if room.cleanup:
+            room.cleanup.cancel()
+            room.cleanup = None
+        return room
+
+    def active_room(self, code: str) -> Room | None:
+        """The live room for uploads/downloads; None if no meeting is running."""
+        room = self.rooms.get(code.upper())
+        return room if room and not room.ended else None
+
+    def _close(self, room: Room):
+        room.tools.clear()  # drop meeting-only tool images from memory
+        room.annotations.clear()
+        db.close_session(room.session_id)
+        if self.rooms.get(room.code) is room:
+            del self.rooms[room.code]
+
+    async def _close_later(self, room: Room):
+        try:
+            await asyncio.sleep(EMPTY_ROOM_GRACE_S)
+        except asyncio.CancelledError:
+            return
+        if not room.peers:
+            self._close(room)
+
+    async def add_tool(self, room: Room, tool: dict) -> dict:
+        if tool["id"] not in room.tools:
+            from .tools import MAX_BYTES_PER_ROOM, MAX_TOOLS_PER_ROOM, ToolError
+            if len(room.tools) >= MAX_TOOLS_PER_ROOM:
+                raise ToolError(f"This meeting already has {MAX_TOOLS_PER_ROOM} tools. Remove some first.")
+            if sum(len(t["data"]) for t in room.tools.values()) + len(tool["data"]) > MAX_BYTES_PER_ROOM:
+                raise ToolError("This meeting's tools are using too much memory. Remove some first.")
+            room.tools[tool["id"]] = tool
+            await room.broadcast({"type": "tools", "tools": room.tool_list()}, role="expert")
+        return next(t for t in room.tool_list() if t["id"] == tool["id"])
+
+    async def remove_tool(self, room: Room, tool_id: str) -> bool:
+        if room.tools.pop(tool_id, None) is None:
+            return False
+        await room.broadcast({"type": "tools", "tools": room.tool_list()}, role="expert")
+        return True
 
     async def _elect_frame_source(self, room: Room):
         """Exactly one expert streams snapshots for tracking."""
@@ -110,6 +166,7 @@ class Hub:
             "presets": ptz.preset_names(room.code),
             "peers": room.roster(),
             "meta": room.meta,
+            "tools": room.tool_list() if peer.role == "expert" else [],
             "media": [{"name": n, **m} for n, m in room.media.items()],
             "tracking_source": peer is room.frame_source,
         })
@@ -142,9 +199,10 @@ class Hub:
             if room.peers:
                 await self._elect_frame_source(room)
                 await room.broadcast({"type": "presence", "peers": room.roster()})
+            elif room.ended:
+                self._close(room)
             else:
-                db.close_session(room.session_id)
-                self.rooms.pop(room.code, None)
+                room.cleanup = asyncio.create_task(self._close_later(room))
 
     # ------------------------------------------------------------------------------
     async def _on_frame(self, room: Room, peer: Peer, data: bytes):
@@ -183,6 +241,10 @@ class Hub:
             ann["author"] = peer.name
             ann["status"] = "ok"
             room.annotations[ann_id] = ann
+            if data.get("live"):
+                # Mid-drag/rotate stream: relay only. The tracker restarts on the final update.
+                await room.broadcast({"type": t, "ann": ann}, exclude=peer)
+                return
             if ann.get("tracked") and ann.get("anchor"):
                 room.tracking.add(ann_id, ann["anchor"])
             else:
@@ -229,6 +291,8 @@ class Hub:
 
         elif t == "end" and peer.role == "expert":
             db.log_event(room.session_id, "end", {"by": peer.name})
+            room.ended = True
+            room.tools.clear()  # meeting over: tool images are gone
             await room.broadcast({"type": "ended"})
             return "end"
 

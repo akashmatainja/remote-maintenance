@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -30,8 +30,21 @@ async def lifespan(_app):
 
 app = FastAPI(title="Expert Guided Remote Maintenance", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
-settings.tools_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/tool-images", StaticFiles(directory=settings.tools_dir), name="tool-images")
+
+
+@app.middleware("http")
+async def revalidate_static(request: Request, call_next):
+    """Make browsers check for a newer app file on every load (a cheap 304 when unchanged).
+
+    Without this, phones keep old JavaScript for hours after an update, so new features
+    (tool images, expert thumbnail) silently don't appear on the technician's screen.
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+
+    return response
+
 templates = Jinja2Templates(directory=APP_DIR / "templates")
 
 ROOM_ALPHABET = "".join(c for c in string.ascii_uppercase + string.digits if c not in "O0I1")
@@ -75,7 +88,12 @@ def remote_camera(
 ):
     if not room:
         return RedirectResponse("/")
-    room = _clean_room(room)
+    try:
+        room = _clean_room(room)
+    except HTTPException:
+        return _render(request, "join.html", "Dashboard", sessions=db.list_sessions(8),
+                       error="That room link isn't valid. Room codes have at least 4 letters or numbers. "
+                             "Ask the expert to send the link again.")
     ctx = {"room": room, "role": role, "name": name or ("Expert" if role == "expert" else "Technician"),
            "mode": ptz.camera_mode(room), "presets": ptz.preset_names(room)}
     template = "technician.html" if role == "technician" else "expert.html"
@@ -102,33 +120,53 @@ def placeholder(request: Request, page: str):
 
 
 # ---------------------------------------------------------------------------- API
-@app.get("/api/tools")
-def list_tools():
-    return tools.list_tools()
+# ------------------------------------------------------------------ meeting tools (memory only)
+def _live_room(room: str):
+    r = hub.active_room(_clean_room(room))
+    if r is None:
+        raise HTTPException(409, "The meeting isn't running. Start or rejoin the session, then add tools.")
+    return r
 
 
-@app.post("/api/tools")
-async def upload_tool(request: Request, name: str = ""):
-    """Raw image bytes in the body (no multipart), name in the query string."""
-    size = int(request.headers.get("content-length") or 0)
-    if size > tools.MAX_UPLOAD_BYTES:
-        raise HTTPException(413, "Image is larger than 5 MB.")
+@app.get("/api/rooms/{room}/tools")
+def list_room_tools(room: str):
+    return _live_room(room).tool_list()
+
+
+@app.post("/api/rooms/{room}/tools")
+async def upload_room_tool(room: str, request: Request, name: str = ""):
+    """Raw file bytes in the body. Kept in memory for this meeting only, never written to disk."""
+    r = _live_room(room)
+    limit = tools.MAX_MODEL_BYTES  # per-type limits are checked in tools.process_upload
+    if int(request.headers.get("content-length") or 0) > limit:
+        raise HTTPException(413, "File is larger than 15 MB.")
     body = bytearray()
     async for chunk in request.stream():
         body.extend(chunk)
-        if len(body) > tools.MAX_UPLOAD_BYTES:
-            raise HTTPException(413, "Image is larger than 5 MB.")
+        if len(body) > limit:
+            raise HTTPException(413, "File is larger than 15 MB.")
     try:
-        return tools.add_tool(bytes(body), name)
+        return await hub.add_tool(r, tools.process_upload(bytes(body), name))
     except tools.ToolError as exc:
         raise HTTPException(400, str(exc)) from exc
 
 
-@app.delete("/api/tools/{tool_id}")
-def delete_tool(tool_id: str):
-    if not tools.delete_tool(tool_id):
-        raise HTTPException(404, "No such tool.")
+@app.delete("/api/rooms/{room}/tools/{tool_id}")
+async def delete_room_tool(room: str, tool_id: str):
+    if not await hub.remove_tool(_live_room(room), tool_id):
+        raise HTTPException(404, "That tool isn't in this meeting.")
     return {"ok": True}
+
+
+@app.get("/room-tools/{room}/{filename}")
+def room_tool_file(room: str, filename: str):
+    r = hub.active_room(_clean_room(room))
+    tool = r and r.tools.get(filename.split(".")[0])
+    if not tool:
+        raise HTTPException(404, "Not available. Tools are removed when the meeting ends.")
+    media = "model/gltf-binary" if tool["ext"] == "glb" else "image/png"
+    # private + no-store: nothing is kept in shared or browser caches after the meeting
+    return Response(tool["data"], media_type=media, headers={"Cache-Control": "private, no-store"})
 
 
 @app.get("/api/lan-ip")

@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap">
   <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}">
+  <script type="importmap">{"imports": {"three": "{{ url_for('static', path='vendor/three/three.module.min.js') }}"}}</script>
   {% block head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">

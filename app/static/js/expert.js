@@ -3,6 +3,7 @@ import { LocalSession } from "./local-webrtc.js";
 import { JitsiSession, summarizeStats } from "./jitsi-client.js";
 import { AnnotationLayer } from "./annotations.js";
 import { FrameSampler } from "./frame-sampler.js";
+import { confirmDialog, linkDialog, toast } from "./ui.js";
 import { attachAudio, detachAudio, onAudioBlocked, unlockAudio } from "./audio.js";
 
 const RC = window.RC; // {room, role, name, mode, presets}
@@ -11,14 +12,6 @@ const $$ = (sel) => [...document.querySelectorAll(sel)];
 
 const stage = $("#stage");
 const video = $("#remote-video");
-const toastEl = $("#toast");
-let toastTimer;
-function toast(text) {
-  toastEl.textContent = text;
-  toastEl.classList.add("show");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toastEl.classList.remove("show"), 3200);
-}
 
 // ---------------------------------------------------------------- realtime + overlay
 const socket = new RoomSocket(RC);
@@ -31,11 +24,13 @@ const layer = new AnnotationLayer({
   onSnapshotMoment: () => { snapshotPromise = sampler.snapshot(); },
   onCommit: (action, ann) => {
     if (action === "remove") return socket.send({ type: "ann_remove", id: ann.id });
+    if (action === "live") return socket.send({ type: "ann_update", live: true, ann: AnnotationLayer.serialize(ann) });
     socket.send({ type: action === "add" ? "ann_add" : "ann_update", ann: AnnotationLayer.serialize(ann) });
     if (ann.tracked && snapshotPromise) snapshotPromise.then((jpeg) => sampler.sendInit(jpeg));
     snapshotPromise = null;
   },
 });
+if (new URLSearchParams(location.search).has("debug")) window.__layer = layer; // tests only
 sampler.wanted = () => layer.hasTracked() && !!video.srcObject;
 
 socket
@@ -47,7 +42,7 @@ socket
   .on("track", (m) => layer.applyTrack(m.updates))
   .on("presence", (m) => updatePeers(m.peers))
   .on("meta", (m) => updateMeta(m))
-  .on("ptz_result", (m) => { if (!m.ok) toast(`Camera did not respond: ${m.error}`); else if (m.guided) toast("Sent to technician"); })
+  .on("ptz_result", (m) => { if (!m.ok) toast(`The PTZ camera didn't respond: ${m.error}`, "error"); else if (m.guided) toast("Sent to technician"); })
   .on("close", () => $("#stat-room").textContent = `${RC.room} (reconnecting)`)
   .on("open", () => $("#stat-room").textContent = RC.room);
 
@@ -215,85 +210,69 @@ $("#cam").addEventListener("click", async (e) => {
   sendMedia();
 });
 
-// ---------------------------------------------------------------- tool images
-// Uploads stay in this browser ("session tools"): the image is scaled down here and
-// embedded in the mark itself as a data URL, so the technician renders it without
-// the server storing anything. They vanish on reload. Server tools saved in
-// TOOLS_DIR (where a persistent disk exists) still load from /api/tools.
-const SESSION_MAX = 512;
-const sessionTools = [];
-let serverTools = [];
+// ---------------------------------------------------------------- tool images (this meeting only)
+// Uploads live in the server's memory for this room and are deleted when the meeting ends.
+const toolsUrl = `/api/rooms/${encodeURIComponent(RC.room)}/tools`;
+socket.on("state", (m) => renderTools(m.tools || [])).on("tools", (m) => renderTools(m.tools));
 
-function toolItem(tool) {
-  const item = document.createElement("div");
-  item.className = "tool-item";
-  item.innerHTML = `<button class="tool-place" draggable="true" title="Drag onto the video, or click to place"><img alt=""><span></span></button><button class="tool-del" aria-label="Delete">&times;</button>`;
-  const place = item.querySelector(".tool-place"), img = item.querySelector("img");
-  img.src = tool.url;
-  item.querySelector("span").textContent = tool.name;
-  item.querySelector(".tool-del").setAttribute("aria-label", `Delete ${tool.name}`);
-  const payload = JSON.stringify({ url: tool.url, name: tool.name, w: tool.w, h: tool.h });
-  place.addEventListener("dragstart", (ev) => {
-    ev.dataTransfer.setData("application/x-tool", payload);
-    ev.dataTransfer.effectAllowed = "copy";
-    ev.dataTransfer.setDragImage(img, img.width / 2, img.height / 2);
-  });
-  place.addEventListener("click", () => {
-    if (!video.srcObject) return toast("Wait for the technician's video first");
-    layer.addImageAt(JSON.parse(payload));
-  });
-  item.querySelector(".tool-del").addEventListener("click", async () => {
-    if (tool.id) {
-      if (!confirm(`Remove "${tool.name}" from the tool library?`)) return;
-      await fetch(`/api/tools/${tool.id}`, { method: "DELETE" });
-      loadTools();
-    } else {
-      sessionTools.splice(sessionTools.indexOf(tool), 1);
-      renderTools();
-    }
-  });
-  return item;
-}
-
-function renderTools() {
+function renderTools(list) {
   const box = $("#tool-items");
   box.innerHTML = "";
-  const list = [...serverTools, ...sessionTools];
-  if (!list.length) { box.innerHTML = `<span class="muted">No tool images yet. Upload a PNG with a transparent background — it stays in this session.</span>`; return; }
-  for (const tool of list) box.appendChild(toolItem(tool));
-}
-
-async function loadTools() {
-  serverTools = await fetch("/api/tools").then((r) => (r.ok ? r.json() : [])).catch(() => []);
-  renderTools();
+  if (!list.length) { box.innerHTML = `<span class="muted">No tools in this meeting yet. Upload a transparent PNG or a .glb 3D model.</span>`; return; }
+  for (const tool of list) {
+    const item = document.createElement("div");
+    item.className = "tool-item";
+    item.innerHTML = `<button class="tool-place" draggable="true" title="Drag onto the video, or click to place"><img alt=""><span></span></button><button class="tool-del" aria-label="Delete">&times;</button>`;
+    const place = item.querySelector(".tool-place"), img = item.querySelector("img");
+    if (tool.kind === "model") {
+      item.classList.add("is-model");
+      img.src = "/static/img/model-placeholder.svg";
+      import("./scene3d.js").then((m) => m.modelThumbnail(tool.url)).then((url) => { img.src = url; }).catch(() => {});
+    } else img.src = tool.url;
+    item.querySelector("span").textContent = tool.name;
+    item.querySelector(".tool-del").setAttribute("aria-label", `Delete ${tool.name}`);
+    const payload = JSON.stringify({ url: tool.url, name: tool.name, w: tool.w, h: tool.h, kind: tool.kind });
+    place.addEventListener("dragstart", (ev) => {
+      ev.dataTransfer.setData("application/x-tool", payload);
+      ev.dataTransfer.effectAllowed = "copy";
+      ev.dataTransfer.setDragImage(img, img.width / 2, img.height / 2);
+    });
+    place.addEventListener("click", () => {
+      if (!video.srcObject) return toast("The technician's video isn't showing yet. Place tools once it appears.");
+      layer.addImageAt(JSON.parse(payload));
+    });
+    item.querySelector(".tool-del").addEventListener("click", async () => {
+      const ok = await confirmDialog({
+        title: `Remove "${tool.name}"?`,
+        body: "It's removed from this meeting, including any copies placed on the video.",
+        confirmText: "Remove", danger: true,
+      });
+      if (!ok) return;
+      const res = await fetch(`${toolsUrl}/${tool.id}`, { method: "DELETE" });
+      if (!res.ok) return toast("Couldn't remove the tool. Refresh the page and try again.", "error");
+      for (const a of [...layer.anns.values()]) {
+        if (a.shape?.src === tool.url) { layer.remove(a.id); socket.send({ type: "ann_remove", id: a.id }); }
+      }
+      toast(`"${tool.name}" removed`, "success");
+    });
+    box.appendChild(item);
+  }
 }
 
 $("#tool-upload").addEventListener("change", async (e) => {
   const files = [...e.target.files];
   e.target.value = "";
   for (const file of files) {
-    try {
-      const bmp = await createImageBitmap(file);
-      const scale = Math.min(1, SESSION_MAX / Math.max(bmp.width, bmp.height));
-      const w = Math.max(1, Math.round(bmp.width * scale)), h = Math.max(1, Math.round(bmp.height * scale));
-      const c = document.createElement("canvas");
-      c.width = w; c.height = h;
-      const ctx = c.getContext("2d");
-      ctx.drawImage(bmp, 0, 0, w, h);
-      bmp.close();
-      const px = ctx.getImageData(0, 0, w, h).data;
-      let transparent = false;
-      for (let i = 3; i < px.length; i += 40) { if (px[i] < 255) { transparent = true; break; } }
-      const name = file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim() || "Tool";
-      sessionTools.push({ url: c.toDataURL("image/png"), name, w, h });
-      if (!transparent) toast(`${name} has no transparent background. A transparent PNG looks cleaner on video.`);
-    } catch {
-      toast(`${file.name}: not a readable image.`);
-    }
+    const name = file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
+    const res = await fetch(`${toolsUrl}?${new URLSearchParams({ name })}`, {
+      method: "POST", body: file, headers: { "Content-Type": file.type || "application/octet-stream" },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast(`Couldn't add ${file.name}: ${data.detail || "the upload failed. Check your connection and try again."}`, "error"); continue; }
+    if (!data.transparent) toast(`${data.name} was added, but it has a solid background. A transparent PNG looks cleaner on video.`);
+    else toast(`${data.name} added for this meeting`, "success");
   }
-  renderTools();
 });
-loadTools();
 $("#record").addEventListener("click", async (e) => {
   const btn = e.currentTarget;
   try {
@@ -305,7 +284,12 @@ $("#record").addEventListener("click", async (e) => {
   }
 });
 $("#end").addEventListener("click", async () => {
-  if (!confirm("End this session for everyone?")) return;
+  const ok = await confirmDialog({
+    title: "End this session?",
+    body: "The call ends for everyone and the technician's screen will show that the session is over.",
+    confirmText: "End session", danger: true,
+  });
+  if (!ok) return;
   socket.send({ type: "end" });
   await session?.leave();
   socket.close();
@@ -318,8 +302,8 @@ $("#copy-link").addEventListener("click", async () => {
     if (ip) origin = `${location.protocol}//${ip}${location.port ? ":" + location.port : ""}`;
   }
   const link = `${origin}/remote-camera?room=${RC.room}&role=technician`;
-  try { await navigator.clipboard.writeText(link); toast("Technician link copied"); }
-  catch { prompt("Send this link to the technician:", link); }
+  try { await navigator.clipboard.writeText(link); toast("Technician link copied. Send it to the technician's phone.", "success"); }
+  catch { linkDialog({ title: "Technician link", body: "Copy this link and send it to the technician's phone.", link }); }
 });
 
 let expertNames = [];
