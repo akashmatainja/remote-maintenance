@@ -17,7 +17,7 @@ const layer = new AnnotationLayer({
   filter: (a) => !a.source || a.source === RC.name,
 });
 
-if (new URLSearchParams(location.search).has("debug")) window.__layer = layer; // tests only
+if (new URLSearchParams(location.search).has("debug")) { window.__layer = layer; window.__dbg = () => session; } // tests only
 socket
   .on("state", (m) => { layer.setAll(m.annotations); (m.media || []).forEach(setMedia); peers(m.peers); })
   .on("media", (m) => setMedia(m))
@@ -53,23 +53,42 @@ function refreshExpertMedia() {
   $("#expert-mic").hidden = !micOff;
 
   // Thumbnail: the first expert with the camera on whose video track we have.
-  let next = null;
+  let next = null, nextName = "";
   if (session) {
     for (const [pid, t] of remoteVideos) {
       const name = session.nameOf(pid);
-      if (experts.includes(name) && media.get(name)?.cam) { next = t; break; }
+      if (experts.includes(name) && media.get(name)?.cam) { next = t; nextName = name; break; }
     }
   }
-  const pip = $("#expert-video");
+  const pip = $("#expert-video"), wrap = $("#expert-pip");
   if (next !== pipTrack) {
     pipTrack?.detach(pip);
     pipTrack = next;
     next?.attach(pip);
   }
-  pip.hidden = !next;
+  wrap.hidden = !next;
+  if (next) {
+    wrap.dataset.name = nextName;
+    pip.play?.().catch(() => {});   // some phones need an explicit play() once the box is visible
+    pipLabel();
+  }
 }
 
-$("#expert-video").addEventListener("click", (e) => e.currentTarget.classList.toggle("pip-left"));
+// Label: the expert's name, or "connecting" until the first picture arrives.
+function pipLabel() {
+  const wrap = $("#expert-pip"), pip = $("#expert-video");
+  const ready = pip.videoWidth > 0;
+  wrap.classList.toggle("waiting", !ready);
+  $("#expert-pip-label").textContent = ready ? (wrap.dataset.name || "Expert") : "Connecting camera\u2026";
+  // Video events don't always fire when frames start on an already-attached stream: re-check.
+  clearTimeout(pipLabel.timer);
+  if (!ready && !wrap.hidden) pipLabel.timer = setTimeout(pipLabel, 500);
+}
+["loadeddata", "resize", "playing"].forEach((ev) => $("#expert-video").addEventListener(ev, pipLabel));
+
+function movePip() { $("#expert-pip").classList.toggle("pip-left"); }
+$("#expert-pip").addEventListener("click", movePip);
+$("#expert-pip").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); movePip(); } });
 
 onAudioBlocked(() => { $("#unlock-audio").hidden = false; });
 $("#unlock-audio").addEventListener("click", async () => {

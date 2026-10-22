@@ -30,7 +30,7 @@ const layer = new AnnotationLayer({
     snapshotPromise = null;
   },
 });
-if (new URLSearchParams(location.search).has("debug")) window.__layer = layer; // tests only
+if (new URLSearchParams(location.search).has("debug")) { window.__layer = layer; window.__dbg = () => session; } // tests only
 sampler.wanted = () => layer.hasTracked() && !!video.srcObject;
 
 socket
@@ -119,7 +119,13 @@ async function startCall() {
       $("#live").textContent = "\u25CF LIVE";
     },
     onFailed: (msg) => { $("#stage-empty").hidden = false; $("#stage-empty").innerHTML = `<div><strong>Call not connected</strong>${msg}</div>`; },
-    onMediaError: () => setMicUi(),
+    onMediaError: (err) => {
+      const missing = [!session.localAudio && "microphone", !session.localVideo && "camera"].filter(Boolean);
+      if (!missing.length) return;
+      toast(err?.name === "NotAllowedError"
+        ? `Your ${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} blocked. Allow access from the icon left of the address bar, then use the buttons on the video.`
+        : `No ${missing.join(" or ")} found. You can still guide the technician; use the buttons on the video to try again.`, "error");
+    },
     onRemoteTrack: (t) => {
       if (t.getType() === "audio") return attachAudio(t);
       if (expertNames.includes(session.nameOf(t.getParticipantId()))) return; // another expert's camera
@@ -152,8 +158,11 @@ async function startCall() {
     },
   });
   // optional: join even without a working mic, so the expert can still watch and guide.
-  await session.start({ audio: true, video: false, optional: true });
-  setMicUi();
+  // Mic and camera start on as soon as the expert allows access. The camera feeds the
+  // technician's thumbnail; "face" keeps it light (640x480) so it starts quickly on phones.
+  await session.start({ audio: true, video: true, facingMode: "user", optional: true, profile: "face" });
+  showSelf(session.localVideo);
+  updateMediaUi();
   sendMedia();
 }
 
@@ -164,11 +173,26 @@ function sendMedia() {
 }
 socket.on("open", () => sendMedia()); // the server forgets media state when the socket drops
 
-function setMicUi() {
-  const btn = $("#mute"), a = session?.localAudio;
-  btn.setAttribute("aria-pressed", String(!a || a.isMuted()));
-  btn.textContent = !a ? "Enable mic" : a.isMuted() ? "Unmute" : "Mute";
-  btn.title = !a ? "Microphone is off or blocked. Click to allow it." : "";
+function showSelf(track) {
+  if (track) track.attach($("#self-view"));
+  $("#self-view-wrap").hidden = !track;
+}
+
+// On-screen buttons: lit = on, red with a slash = off.
+function updateMediaUi() {
+  const a = session?.localAudio, micOn = !!a && !a.isMuted();
+  const mic = $("#mute");
+  mic.setAttribute("aria-pressed", String(micOn));
+  mic.classList.toggle("off", !micOn);
+  mic.title = !a ? "Microphone is off or blocked. Click to turn it on." : micOn ? "Mute microphone" : "Unmute microphone";
+  mic.setAttribute("aria-label", mic.title);
+
+  const camOn = !!session?.localVideo;
+  const cam = $("#cam");
+  cam.setAttribute("aria-pressed", String(camOn));
+  cam.classList.toggle("off", !camOn);
+  cam.title = camOn ? "Turn camera off (hides your thumbnail on the technician's screen)" : "Turn camera on (shows you to the technician)";
+  cam.setAttribute("aria-label", cam.title);
 }
 
 onAudioBlocked(() => toast("Click anywhere on the page to hear the technician"));
@@ -182,31 +206,32 @@ if (!window.isSecureContext) {
 $("#mute").addEventListener("click", async () => {
   if (!session) return;
   try {
-    if (!session.localAudio) { await session.enableMic(); toast("Microphone on"); }
+    if (!session.localAudio) { await session.enableMic(); toast("Microphone on", "success"); }
     else await session.toggleMute();
   } catch (err) {
     toast(err?.name === "NotAllowedError"
-      ? "Microphone is blocked. Allow it from the icon left of the address bar, then click again."
-      : `No microphone found (${err?.message || err?.name || err}).`);
+      ? "Microphone is blocked. Allow it from the icon left of the address bar, then click the microphone button again."
+      : "No microphone found on this computer.", "error");
   }
-  setMicUi();
+  updateMediaUi();
   sendMedia();
 });
 
 $("#cam").addEventListener("click", async (e) => {
   if (!session) return;
   const btn = e.currentTarget, turnOn = !session.localVideo;
+  btn.disabled = true;
   try {
-    const t = await session.setCamera(turnOn);
-    if (t) t.attach($("#self-view"));
-    $("#self-view-wrap").hidden = !t;
-    btn.setAttribute("aria-pressed", String(!!t));
-    btn.textContent = t ? "Camera off" : "Camera";
+    showSelf(await session.setCamera(turnOn));
   } catch (err) {
     toast(err?.name === "NotAllowedError"
-      ? "Camera is blocked. Allow it from the icon left of the address bar, then click again."
-      : `Could not start the camera (${err?.message || err?.name || err}).`);
+      ? "Camera is blocked. Allow it from the icon left of the address bar, then click the camera button again."
+      : err?.name === "NotReadableError"
+        ? "Your camera is being used by another app. Close it and try again."
+        : "No camera found on this computer.", "error");
   }
+  btn.disabled = false;
+  updateMediaUi();
   sendMedia();
 });
 

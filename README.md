@@ -138,11 +138,14 @@ location /ws/ {
 ## Expert voice, camera and tool images
 
 - **Microphone:** the expert joins with the mic on. If the PC has no mic or it was blocked,
-  the call still starts and the button reads **Enable mic**; click it after allowing access.
+  the call still starts and the microphone button shows as off; click it after allowing access.
   The technician sees an "Expert mic off" badge whenever the expert is muted. If a phone
   browser blocks sound, the technician gets a **Tap to hear the expert** button.
-- **Camera:** **Camera** in the PTZ panel turns the expert's webcam on. The technician sees it
-  as a thumbnail (tap it to move it to the other side); the expert sees a self-view.
+- **Camera:** the expert's webcam turns on when they allow camera access (640x480, light enough
+  to start quickly on phones). The technician sees it as a thumbnail with the expert's name
+  (tap it to move it to the other side); the expert sees a self-view in the side panel.
+- **On-screen buttons:** the microphone and camera buttons sit on the bottom-right of the video.
+  They turn red with a slash when off. If access was blocked, clicking them asks again.
 - **Tools (images and 3D models):** **Upload image** under the video adds PNG/WebP/JPEG/GIF
   files (max 5 MB, scaled to 512 px) or `.glb` 3D models (max 15 MB) to a shared tool library.
   Drag a tool onto the video or click it. Click a placed tool to select it, then drag it to

@@ -20,26 +20,33 @@ export class JitsiSession {
     this.recordingSession = null;
   }
 
-  async start({ audio = true, video = false, facingMode = "environment", cameraDeviceId, optional = false } = {}) {
+  async start({ audio = true, video = false, facingMode = "environment", cameraDeviceId, optional = false, profile = "work" } = {}) {
     if (!J()) throw new Error(`lib-jitsi-meet did not load from https://${this.cfg.domain}/libs/`);
     J().init({ disableAudioLevels: true });
     J().setLogLevel(J().logLevels.ERROR);
 
+    const face = profile === "face";
+    const create = (devices) => J().createLocalTracks({
+      devices, facingMode, cameraDeviceId, resolution: face ? 480 : 1080,
+      constraints: { video: face
+        ? { height: { ideal: 480 }, width: { ideal: 640 }, frameRate: { ideal: 15 } }
+        : { height: { ideal: 1080, max: 1080 }, width: { ideal: 1920 }, frameRate: { ideal: 24 } } },
+    });
     const devices = [];
     if (audio) devices.push("audio");
     if (video) devices.push("video");
     if (devices.length) {
       try {
-        this.localTracks = await J().createLocalTracks({
-          devices, facingMode, cameraDeviceId, resolution: 1080,
-          constraints: { video: { height: { ideal: 1080, max: 1080 }, width: { ideal: 1920 }, frameRate: { ideal: 24 } } },
-        });
+        this.localTracks = await create(devices);
       } catch (err) {
-        if (optional) this.hooks.onMediaError?.(err);
-        else {
+        if (!optional) {
           this.hooks.onFailed?.(`Camera or microphone blocked: ${err.message || err.name || err}`);
           throw err;
         }
+        for (const d of devices) {  // keep whatever works, e.g. mic without a webcam
+          try { this.localTracks.push(...(await create([d]))); } catch (_) {}
+        }
+        this.hooks.onMediaError?.(err);
       }
     }
     await this._connect();
@@ -114,7 +121,7 @@ export class JitsiSession {
       this.localTracks = this.localTracks.filter((t) => t !== prev);
     }
     if (!on) return null;
-    const [t] = await J().createLocalTracks({ devices: ["video"], facingMode: "user", cameraDeviceId, resolution: 720 });
+    const [t] = await J().createLocalTracks({ devices: ["video"], facingMode: "user", cameraDeviceId, resolution: 480 });
     await this.conference.addTrack(t);
     this.localTracks.push(t);
     return t;

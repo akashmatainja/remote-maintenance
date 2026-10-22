@@ -10,7 +10,10 @@
       <span class="pill" id="expert-name">Waiting for expert</span>
       <span class="pill-stack"><span class="pill" id="status">Connecting</span><span class="pill warn" id="expert-mic" hidden>Expert mic off</span></span>
     </div>
-    <video id="expert-video" class="pip" autoplay playsinline muted hidden aria-label="Expert camera (tap to move)"></video>
+    <div class="pip-wrap" id="expert-pip" hidden role="button" tabindex="0" aria-label="Expert camera. Tap to move it to the other side.">
+      <video id="expert-video" autoplay playsinline muted></video>
+      <span class="pip-label" id="expert-pip-label">Expert</span>
+    </div>
     <button class="unlock-audio" id="unlock-audio" hidden>&#128266; Tap to hear the expert</button>
     <div class="guide" id="guide" aria-live="polite"></div>
     <div class="stage-empty problem" id="problem" role="alert" hidden></div>

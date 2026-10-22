@@ -24,8 +24,11 @@ class Track {
   async dispose() { this.mst.stop(); }
 }
 
-function videoConstraints({ facingMode, cameraDeviceId }) {
-  const base = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 24 } };
+// "work" = technician camera (detail matters). "face" = expert thumbnail (light and quick to start).
+function videoConstraints({ facingMode, cameraDeviceId, profile = "work" }) {
+  const base = profile === "face"
+    ? { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15, max: 20 } }
+    : { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 24 } };
   return cameraDeviceId ? { ...base, deviceId: { exact: cameraDeviceId } } : { ...base, facingMode };
 }
 
@@ -46,21 +49,27 @@ export class LocalSession {
 
   // optional: join the call even if the devices are missing or blocked (expert can still
   // see and hear the technician, and turn the mic on later).
-  async start({ audio = true, video = false, facingMode = "environment", cameraDeviceId, optional = false } = {}) {
+  async start({ audio = true, video = false, facingMode = "environment", cameraDeviceId, optional = false, profile = "work" } = {}) {
+    this.profile = profile;
     if (audio || video) {
+      const ask = (a, v) => navigator.mediaDevices.getUserMedia({
+        audio: a ? { echoCancellation: true, noiseSuppression: true } : false,
+        video: v ? videoConstraints({ facingMode, cameraDeviceId, profile }) : false,
+      });
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: audio ? { echoCancellation: true, noiseSuppression: true } : false,
-          video: video ? videoConstraints({ facingMode, cameraDeviceId }) : false,
-        });
-        this.localTracks = stream.getTracks().map((t) => new Track(t, null, true));
+        this.localTracks = (await ask(audio, video)).getTracks().map((t) => new Track(t, null, true));
       } catch (err) {
         const hint = window.isSecureContext ? "" : " This page must be opened over HTTPS (or on localhost) to use the camera.";
-        if (optional) this.hooks.onMediaError?.(err);
-        else {
+        if (!optional) {
           this.hooks.onFailed?.(`Camera or microphone blocked: ${err.message || err.name}.${hint}`);
           throw err;
         }
+        // Optional media (expert): keep whatever works, e.g. mic without a webcam.
+        for (const [a, v] of [[audio, false], [false, video]]) {
+          if (!a && !v) continue;
+          try { this.localTracks.push(...(await ask(a, v)).getTracks().map((t) => new Track(t, null, true))); } catch (_) {}
+        }
+        this.hooks.onMediaError?.(err);
       }
     }
     this._connectSignaling();
@@ -163,8 +172,13 @@ export class LocalSession {
       if (s.track?.kind !== "video") continue;
       const p = s.getParameters();
       if (!p.encodings?.length) continue;
-      p.encodings[0].maxBitrate = 2_500_000;
-      p.degradationPreference = "maintain-resolution";
+      if (this.profile === "face") {
+        p.encodings[0].maxBitrate = 600_000;      // a face thumbnail needs little bandwidth
+        p.degradationPreference = "balanced";
+      } else {
+        p.encodings[0].maxBitrate = 2_500_000;
+        p.degradationPreference = "maintain-resolution";
+      }
       try { await s.setParameters(p); } catch (_) {}
     }
   }
@@ -232,7 +246,7 @@ export class LocalSession {
   /** Expert webcam on/off. Returns the local track when on. */
   async setCamera(on, { cameraDeviceId } = {}) {
     if (!on) return this._setLocal("video", null);
-    const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints({ facingMode: "user", cameraDeviceId }) });
+    const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints({ facingMode: "user", cameraDeviceId, profile: "face" }) });
     return this._setLocal("video", stream.getVideoTracks()[0]);
   }
 
