@@ -143,11 +143,14 @@ location /ws/ {
   browser blocks sound, the technician gets a **Tap to hear the expert** button.
 - **Camera:** **Camera** in the PTZ panel turns the expert's webcam on. The technician sees it
   as a thumbnail (tap it to move it to the other side); the expert sees a self-view.
-- **Tool images:** **Upload image** under the video adds PNG/WebP/JPEG/GIF files (max 5 MB,
-  scaled to 512 px) to a shared tool library. Transparent PNGs look best. Drag a tool onto
-  the video or click it to place it in the centre; scroll over it to resize, Shift+scroll to
-  rotate. With **Follow object** on, the tool sticks to the part underneath it. Images are
-  stored in `TOOLS_DIR` (see `.env.example`; on Render use a persistent disk).
+- **Tool images:** **Upload image** under the video adds PNG/WebP/JPEG/GIF files
+  (scaled to 512 px) as *session tools*: the image is processed in the expert's
+  browser and embedded in the mark itself, so the technician renders it without
+  the server storing anything — they vanish on reload. Transparent PNGs look
+  best. Drag a tool onto the video or click it to place it in the centre; scroll
+  over it to resize, Shift+scroll to rotate. With **Follow object** on, the tool
+  sticks to the part underneath it. If `TOOLS_DIR` points at a persistent disk,
+  images saved there still load from `/api/tools` alongside session tools.
 
 ## Cameras: handheld and PTZ
 

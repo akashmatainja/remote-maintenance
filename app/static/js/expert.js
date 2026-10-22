@@ -216,51 +216,82 @@ $("#cam").addEventListener("click", async (e) => {
 });
 
 // ---------------------------------------------------------------- tool images
-async function loadTools() {
-  const list = await (await fetch("/api/tools")).json();
-  const box = $("#tool-items");
-  box.innerHTML = "";
-  if (!list.length) { box.innerHTML = `<span class="muted">No tool images yet. Upload a PNG with a transparent background.</span>`; return; }
-  for (const tool of list) {
-    const item = document.createElement("div");
-    item.className = "tool-item";
-    item.innerHTML = `<button class="tool-place" draggable="true" title="Drag onto the video, or click to place"><img alt=""><span></span></button><button class="tool-del" aria-label="Delete">&times;</button>`;
-    const place = item.querySelector(".tool-place"), img = item.querySelector("img");
-    img.src = tool.url;
-    item.querySelector("span").textContent = tool.name;
-    item.querySelector(".tool-del").setAttribute("aria-label", `Delete ${tool.name}`);
-    const payload = JSON.stringify({ url: tool.url, name: tool.name, w: tool.w, h: tool.h });
-    place.addEventListener("dragstart", (ev) => {
-      ev.dataTransfer.setData("application/x-tool", payload);
-      ev.dataTransfer.effectAllowed = "copy";
-      ev.dataTransfer.setDragImage(img, img.width / 2, img.height / 2);
-    });
-    place.addEventListener("click", () => {
-      if (!video.srcObject) return toast("Wait for the technician's video first");
-      layer.addImageAt(JSON.parse(payload));
-    });
-    item.querySelector(".tool-del").addEventListener("click", async () => {
+// Uploads stay in this browser ("session tools"): the image is scaled down here and
+// embedded in the mark itself as a data URL, so the technician renders it without
+// the server storing anything. They vanish on reload. Server tools saved in
+// TOOLS_DIR (where a persistent disk exists) still load from /api/tools.
+const SESSION_MAX = 512;
+const sessionTools = [];
+let serverTools = [];
+
+function toolItem(tool) {
+  const item = document.createElement("div");
+  item.className = "tool-item";
+  item.innerHTML = `<button class="tool-place" draggable="true" title="Drag onto the video, or click to place"><img alt=""><span></span></button><button class="tool-del" aria-label="Delete">&times;</button>`;
+  const place = item.querySelector(".tool-place"), img = item.querySelector("img");
+  img.src = tool.url;
+  item.querySelector("span").textContent = tool.name;
+  item.querySelector(".tool-del").setAttribute("aria-label", `Delete ${tool.name}`);
+  const payload = JSON.stringify({ url: tool.url, name: tool.name, w: tool.w, h: tool.h });
+  place.addEventListener("dragstart", (ev) => {
+    ev.dataTransfer.setData("application/x-tool", payload);
+    ev.dataTransfer.effectAllowed = "copy";
+    ev.dataTransfer.setDragImage(img, img.width / 2, img.height / 2);
+  });
+  place.addEventListener("click", () => {
+    if (!video.srcObject) return toast("Wait for the technician's video first");
+    layer.addImageAt(JSON.parse(payload));
+  });
+  item.querySelector(".tool-del").addEventListener("click", async () => {
+    if (tool.id) {
       if (!confirm(`Remove "${tool.name}" from the tool library?`)) return;
       await fetch(`/api/tools/${tool.id}`, { method: "DELETE" });
       loadTools();
-    });
-    box.appendChild(item);
-  }
+    } else {
+      sessionTools.splice(sessionTools.indexOf(tool), 1);
+      renderTools();
+    }
+  });
+  return item;
+}
+
+function renderTools() {
+  const box = $("#tool-items");
+  box.innerHTML = "";
+  const list = [...serverTools, ...sessionTools];
+  if (!list.length) { box.innerHTML = `<span class="muted">No tool images yet. Upload a PNG with a transparent background — it stays in this session.</span>`; return; }
+  for (const tool of list) box.appendChild(toolItem(tool));
+}
+
+async function loadTools() {
+  serverTools = await fetch("/api/tools").then((r) => (r.ok ? r.json() : [])).catch(() => []);
+  renderTools();
 }
 
 $("#tool-upload").addEventListener("change", async (e) => {
   const files = [...e.target.files];
   e.target.value = "";
   for (const file of files) {
-    const name = file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
-    const res = await fetch(`/api/tools?${new URLSearchParams({ name })}`, {
-      method: "POST", body: file, headers: { "Content-Type": file.type || "application/octet-stream" },
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) { toast(`${file.name}: ${data.detail || "upload failed"}`); continue; }
-    if (!data.transparent) toast(`${data.name} has no transparent background. A transparent PNG looks cleaner on video.`);
+    try {
+      const bmp = await createImageBitmap(file);
+      const scale = Math.min(1, SESSION_MAX / Math.max(bmp.width, bmp.height));
+      const w = Math.max(1, Math.round(bmp.width * scale)), h = Math.max(1, Math.round(bmp.height * scale));
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(bmp, 0, 0, w, h);
+      bmp.close();
+      const px = ctx.getImageData(0, 0, w, h).data;
+      let transparent = false;
+      for (let i = 3; i < px.length; i += 40) { if (px[i] < 255) { transparent = true; break; } }
+      const name = file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim() || "Tool";
+      sessionTools.push({ url: c.toDataURL("image/png"), name, w, h });
+      if (!transparent) toast(`${name} has no transparent background. A transparent PNG looks cleaner on video.`);
+    } catch {
+      toast(`${file.name}: not a readable image.`);
+    }
   }
-  loadTools();
+  renderTools();
 });
 loadTools();
 $("#record").addEventListener("click", async (e) => {
