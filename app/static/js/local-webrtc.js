@@ -44,7 +44,9 @@ export class LocalSession {
   get localVideo() { return this.localTracks.find((t) => t.getType() === "video"); }
   nameOf(pid) { return this.participants.get(pid) || pid; }
 
-  async start({ audio = true, video = false, facingMode = "environment", cameraDeviceId } = {}) {
+  // optional: join the call even if the devices are missing or blocked (expert can still
+  // see and hear the technician, and turn the mic on later).
+  async start({ audio = true, video = false, facingMode = "environment", cameraDeviceId, optional = false } = {}) {
     if (audio || video) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -54,8 +56,11 @@ export class LocalSession {
         this.localTracks = stream.getTracks().map((t) => new Track(t, null, true));
       } catch (err) {
         const hint = window.isSecureContext ? "" : " This page must be opened over HTTPS (or on localhost) to use the camera.";
-        this.hooks.onFailed?.(`Camera or microphone blocked: ${err.message || err.name}.${hint}`);
-        throw err;
+        if (optional) this.hooks.onMediaError?.(err);
+        else {
+          this.hooks.onFailed?.(`Camera or microphone blocked: ${err.message || err.name}.${hint}`);
+          throw err;
+        }
       }
     }
     this._connectSignaling();
@@ -117,9 +122,10 @@ export class LocalSession {
     const { pc } = this._peer(id);
     const stream = new MediaStream(this.localTracks.map((t) => t.getTrack()));
     this.localTracks.forEach((t) => pc.addTrack(t.getTrack(), stream));
-    // Always offer to receive both kinds, so an audio-only expert still gets the video.
+    // Always negotiate audio + video both ways, even with no local device yet. An audio-only
+    // expert still receives video, and can switch the camera on later with replaceTrack().
     for (const kind of ["audio", "video"]) {
-      if (!this.localTracks.some((t) => t.getType() === kind)) pc.addTransceiver(kind, { direction: "recvonly" });
+      if (!this.localTracks.some((t) => t.getType() === kind)) pc.addTransceiver(kind, { direction: "sendrecv" });
     }
     await pc.setLocalDescription(await pc.createOffer());
     this._send(id, { sdp: pc.localDescription });
@@ -138,6 +144,7 @@ export class LocalSession {
           if (tr) { await tr.sender.replaceTrack(t.getTrack()); tr.sender.setStreams?.(stream); tr.direction = "sendrecv"; }
           else pc.addTrack(t.getTrack(), stream);
         }
+        pc.getTransceivers().forEach((x) => { if (x.direction === "recvonly") x.direction = "sendrecv"; });
         await pc.setLocalDescription(await pc.createAnswer());
         this._send(from, { sdp: pc.localDescription });
       }
@@ -205,6 +212,35 @@ export class LocalSession {
     }
     out.packetLoss.total = lostSum + recvSum > 0 ? (100 * lostSum) / (lostSum + recvSum) : 0;
     this.hooks.onStats(out);
+  }
+
+  /** Put a local track (or null) on every connection's audio/video sender. No renegotiation. */
+  async _setLocal(kind, mst) {
+    const prev = this.localTracks.find((t) => t.getType() === kind);
+    for (const { pc } of this.peers.values()) {
+      const tr = pc.getTransceivers().find((x) => x.receiver.track.kind === kind);
+      if (tr) await tr.sender.replaceTrack(mst);
+      if (mst) this._tuneSenders(pc);
+    }
+    if (prev) { prev.dispose(); this.localTracks = this.localTracks.filter((t) => t !== prev); }
+    if (!mst) return null;
+    const t = new Track(mst, null, true);
+    this.localTracks.push(t);
+    return t;
+  }
+
+  /** Expert webcam on/off. Returns the local track when on. */
+  async setCamera(on, { cameraDeviceId } = {}) {
+    if (!on) return this._setLocal("video", null);
+    const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints({ facingMode: "user", cameraDeviceId }) });
+    return this._setLocal("video", stream.getVideoTracks()[0]);
+  }
+
+  /** Ask for the microphone again (after it was missing or blocked at start). */
+  async enableMic() {
+    if (this.localAudio) return this.localAudio;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    return this._setLocal("audio", stream.getAudioTracks()[0]);
   }
 
   async toggleMute() {

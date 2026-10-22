@@ -6,7 +6,12 @@
 <div class="tech-wrap">
   <div class="stage" id="stage">
     <video id="local-video" autoplay playsinline muted></video>
-    <div class="tech-top"><span id="expert-name">Waiting for expert</span><span id="status">Connecting</span></div>
+    <div class="tech-top">
+      <span class="pill" id="expert-name">Waiting for expert</span>
+      <span class="pill-stack"><span class="pill" id="status">Connecting</span><span class="pill warn" id="expert-mic" hidden>Expert mic off</span></span>
+    </div>
+    <video id="expert-video" class="pip" autoplay playsinline muted hidden aria-label="Expert camera (tap to move)"></video>
+    <button class="unlock-audio" id="unlock-audio" hidden>&#128266; Tap to hear the expert</button>
     <div class="guide" id="guide" aria-live="polite"></div>
     <div class="stage-empty problem" id="problem" role="alert" hidden></div>
   </div>

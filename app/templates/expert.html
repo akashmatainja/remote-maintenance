@@ -39,6 +39,15 @@
       <span class="timer" id="timer">00:00:00</span>
       <div class="caption"><span>Expert: {{ name }}</span><span id="cap-tech">Technician: waiting</span><span id="cap-quality">-</span></div>
     </div>
+
+    <div class="tooltray" aria-label="Tool images">
+      <span class="tooltray-title">Tools</span>
+      <div class="tooltray-items" id="tool-items"><span class="muted">No tool images yet. Upload a PNG with a transparent background.</span></div>
+      <label class="btn-link tooltray-upload">Upload image
+        <input type="file" id="tool-upload" accept="image/png,image/webp,image/gif,image/jpeg" multiple hidden>
+      </label>
+    </div>
+    <p class="tooltray-hint">Drag a tool onto the video, or click it to place it in the centre. Over a placed tool: scroll to resize, Shift+scroll to rotate. Use Move to reposition and Erase to remove.</p>
   </section>
 
   <aside class="panel" aria-label="Camera control">
@@ -61,8 +70,13 @@
     {% if mode == "handheld" %}
       <p class="hint">Handheld camera: these buttons show directions on the technician's screen. Zoom uses the phone's camera zoom where supported.</p>
     {% endif %}
+    <div class="self-view-wrap" id="self-view-wrap" hidden>
+      <video id="self-view" class="self-view" autoplay playsinline muted></video>
+      <span>You (seen by technician)</span>
+    </div>
     <div class="call-actions">
       <button class="btn-mute" id="mute" aria-pressed="false">Mute</button>
+      <button class="btn-cam" id="cam" aria-pressed="false">Camera</button>
       <button class="btn-record" id="record" aria-pressed="false">Record</button>
       <button class="btn-end" id="end">End</button>
     </div>

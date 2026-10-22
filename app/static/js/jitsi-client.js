@@ -20,7 +20,7 @@ export class JitsiSession {
     this.recordingSession = null;
   }
 
-  async start({ audio = true, video = false, facingMode = "environment", cameraDeviceId } = {}) {
+  async start({ audio = true, video = false, facingMode = "environment", cameraDeviceId, optional = false } = {}) {
     if (!J()) throw new Error(`lib-jitsi-meet did not load from https://${this.cfg.domain}/libs/`);
     J().init({ disableAudioLevels: true });
     J().setLogLevel(J().logLevels.ERROR);
@@ -35,8 +35,11 @@ export class JitsiSession {
           constraints: { video: { height: { ideal: 1080, max: 1080 }, width: { ideal: 1920 }, frameRate: { ideal: 24 } } },
         });
       } catch (err) {
-        this.hooks.onFailed?.(`Camera or microphone blocked: ${err.message || err.name || err}`);
-        throw err;
+        if (optional) this.hooks.onMediaError?.(err);
+        else {
+          this.hooks.onFailed?.(`Camera or microphone blocked: ${err.message || err.name || err}`);
+          throw err;
+        }
       }
     }
     await this._connect();
@@ -102,6 +105,28 @@ export class JitsiSession {
   nameOf(participantId) { return this.participants.get(participantId) || participantId; }
   get localAudio() { return this.localTracks.find((t) => t.getType() === "audio"); }
   get localVideo() { return this.localTracks.find((t) => t.getType() === "video"); }
+
+  async setCamera(on, { cameraDeviceId } = {}) {
+    const prev = this.localVideo;
+    if (prev) {
+      await this.conference.removeTrack(prev);
+      await prev.dispose();
+      this.localTracks = this.localTracks.filter((t) => t !== prev);
+    }
+    if (!on) return null;
+    const [t] = await J().createLocalTracks({ devices: ["video"], facingMode: "user", cameraDeviceId, resolution: 720 });
+    await this.conference.addTrack(t);
+    this.localTracks.push(t);
+    return t;
+  }
+
+  async enableMic() {
+    if (this.localAudio) return this.localAudio;
+    const [t] = await J().createLocalTracks({ devices: ["audio"] });
+    await this.conference.addTrack(t);
+    this.localTracks.push(t);
+    return t;
+  }
 
   async toggleMute() {
     const a = this.localAudio;

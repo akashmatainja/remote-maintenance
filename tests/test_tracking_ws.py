@@ -85,7 +85,7 @@ def test_pages_render():
         assert r.status_code == 200 and "PTZ control" in r.text
         assert client.get("/remote-camera?room=7K42QX&role=technician").status_code == 200
         assert client.get("/sessions").status_code == 200
-        assert client.get("/machines").status_code == 200
+        assert client.get("/no-such-page").status_code == 404
         cfg = client.get("/api/jitsi-config?room=7K42QX&role=expert&name=A").json()
         if cfg["backend"] == "jitsi":
             assert cfg["room"] == "7k42qx"  # lib-jitsi-meet needs lowercase room names

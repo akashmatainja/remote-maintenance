@@ -2,6 +2,7 @@ import { RoomSocket } from "./room-socket.js";
 import { LocalSession } from "./local-webrtc.js";
 import { JitsiSession } from "./jitsi-client.js";
 import { AnnotationLayer } from "./annotations.js";
+import { attachAudio, detachAudio, onAudioBlocked, unlockAudio } from "./audio.js";
 
 const RC = window.RC;
 const $ = (sel) => document.querySelector(sel);
@@ -16,7 +17,8 @@ const layer = new AnnotationLayer({
 });
 
 socket
-  .on("state", (m) => { layer.setAll(m.annotations); peers(m.peers); })
+  .on("state", (m) => { layer.setAll(m.annotations); (m.media || []).forEach(setMedia); peers(m.peers); })
+  .on("media", (m) => setMedia(m))
   .on("ann_add", (m) => layer.upsert(m.ann))
   .on("ann_update", (m) => layer.upsert(m.ann))
   .on("ann_remove", (m) => layer.remove(m.id))
@@ -26,10 +28,50 @@ socket
   .on("guide", (m) => guide(m.action, m.value))
   .on("ended", () => end("The expert ended the session."));
 
+// ---------------------------------------------------------------- expert presence, thumbnail, mic
+let experts = [];
+const media = new Map();         // expert name -> {cam, mic}
+const remoteVideos = new Map();  // participantId -> track (the expert's camera, possibly others)
+let pipTrack = null;
+
 function peers(list) {
-  const experts = list.filter((p) => p.role === "expert").map((p) => p.name);
+  experts = list.filter((p) => p.role === "expert").map((p) => p.name);
   $("#expert-name").textContent = experts.length ? `Expert: ${experts.join(", ")}` : "Waiting for expert";
+  refreshExpertMedia();
 }
+
+function setMedia(m) {
+  media.set(m.name, { cam: !!m.cam, mic: !!m.mic });
+  refreshExpertMedia();
+}
+
+function refreshExpertMedia() {
+  const micOff = experts.length > 0 && experts.every((n) => media.has(n) && !media.get(n).mic);
+  $("#expert-mic").hidden = !micOff;
+
+  // Thumbnail: the first expert with the camera on whose video track we have.
+  let next = null;
+  if (session) {
+    for (const [pid, t] of remoteVideos) {
+      const name = session.nameOf(pid);
+      if (experts.includes(name) && media.get(name)?.cam) { next = t; break; }
+    }
+  }
+  const pip = $("#expert-video");
+  if (next !== pipTrack) {
+    pipTrack?.detach(pip);
+    pipTrack = next;
+    next?.attach(pip);
+  }
+  pip.hidden = !next;
+}
+
+$("#expert-video").addEventListener("click", (e) => e.currentTarget.classList.toggle("pip-left"));
+
+onAudioBlocked(() => { $("#unlock-audio").hidden = false; });
+$("#unlock-audio").addEventListener("click", async () => {
+  if (await unlockAudio()) $("#unlock-audio").hidden = true;
+});
 
 // ---------------------------------------------------------------- guidance from the PTZ panel
 const GUIDE = {
@@ -84,12 +126,16 @@ async function start() {
   const Session = cfg.backend === "local" ? LocalSession : JitsiSession;
   session = new Session(cfg, RC.name, {
     onRemoteTrack: (t) => {
-      if (t.getType() !== "audio") return; // the technician only needs the expert's voice
-      const el = document.createElement("audio");
-      el.autoplay = true; el.dataset.pid = t.getParticipantId();
-      document.body.appendChild(el); t.attach(el);
+      if (t.getType() === "audio") return attachAudio(t);
+      remoteVideos.set(t.getParticipantId(), t);
+      refreshExpertMedia();
     },
-    onRemoteTrackRemoved: (t) => document.querySelectorAll(`audio[data-pid="${t.getParticipantId()}"]`).forEach((e) => e.remove()),
+    onRemoteTrackRemoved: (t) => {
+      if (t.getType() === "audio") return detachAudio(t);
+      if (remoteVideos.get(t.getParticipantId()) === t) remoteVideos.delete(t.getParticipantId());
+      refreshExpertMedia();
+    },
+    onParticipants: () => refreshExpertMedia(),
     onFailed: (msg) => { if (!/Camera or microphone/.test(msg)) problem("Call not connected", msg); },
     onJoined: () => { $("#status").textContent = "Live"; },
   });

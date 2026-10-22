@@ -135,6 +135,20 @@ location /ws/ {
 }
 ```
 
+## Expert voice, camera and tool images
+
+- **Microphone:** the expert joins with the mic on. If the PC has no mic or it was blocked,
+  the call still starts and the button reads **Enable mic**; click it after allowing access.
+  The technician sees an "Expert mic off" badge whenever the expert is muted. If a phone
+  browser blocks sound, the technician gets a **Tap to hear the expert** button.
+- **Camera:** **Camera** in the PTZ panel turns the expert's webcam on. The technician sees it
+  as a thumbnail (tap it to move it to the other side); the expert sees a self-view.
+- **Tool images:** **Upload image** under the video adds PNG/WebP/JPEG/GIF files (max 5 MB,
+  scaled to 512 px) to a shared tool library. Transparent PNGs look best. Drag a tool onto
+  the video or click it to place it in the centre; scroll over it to resize, Shift+scroll to
+  rotate. With **Follow object** on, the tool sticks to the part underneath it. Images are
+  stored in `TOOLS_DIR` (see `.env.example`; on Render use a persistent disk).
+
 ## Cameras: handheld and PTZ
 
 **Handheld (phone/tablet).** The technician opens the link; the back camera is used by default.

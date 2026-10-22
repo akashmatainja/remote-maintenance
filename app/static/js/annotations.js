@@ -2,12 +2,13 @@
 //
 // Annotation shape (what travels over the WebSocket):
 // {
-//   id, kind: "ring" | "box" | "arrow" | "text" | "pen",
+//   id, kind: "ring" | "box" | "arrow" | "text" | "pen" | "image",
 //   color, label, tracked: bool, source: <Jitsi display name of the camera it belongs to>,
 //   anchor: {x, y, w, h},            // box around the object, 0..1 of the video frame
 //   shape: {
 //     offset: {dx, dy},              // arrow/text: label position relative to anchor centre
 //     points: [[u, v], ...]          // pen: points relative to the anchor box (0..1 of anchor)
+//     src, rot                       // image: tool picture URL, rotation in degrees
 //   },
 //   status: "ok" | "lost"
 // }
@@ -59,7 +60,8 @@ export class AnnotationLayer {
 
     new ResizeObserver(() => this._resize()).observe(this.canvas);
     this._resize();
-    if (editable) this._bindPointer();
+    this._imgs = new Map();
+    if (editable) { this._bindPointer(); this._bindDrop(); }
     const loop = () => { this._draw(); requestAnimationFrame(loop); };
     requestAnimationFrame(loop);
   }
@@ -103,8 +105,60 @@ export class AnnotationLayer {
   }
 
   static serialize(ann) {
-    const { _view, _dragging, _labelRect, ...clean } = ann;
-    return clean;
+    return Object.fromEntries(Object.entries(ann).filter(([k]) => !k.startsWith("_")));
+  }
+
+  /** Place a tool picture on the video. clientX/Y = drop point; omit to place in the centre. */
+  addImageAt(tool, clientX, clientY) {
+    const r = this.contentRect();
+    if (!r.ready) return;
+    const b = this.canvas.getBoundingClientRect();
+    const p = clientX == null ? { x: 0.5, y: 0.5 }
+      : { x: clamp((clientX - b.left - r.x) / r.w, 0, 1), y: clamp((clientY - b.top - r.y) / r.h, 0, 1) };
+    const w = 0.2, h = w * (r.w / r.h) * ((tool.h || 1) / (tool.w || 1));
+    this.onSnapshotMoment();
+    this._add({
+      id: uid(), kind: "image", color: this.color, tracked: this.tracked, source: this.source, status: "ok",
+      label: tool.name || "", shape: { src: tool.url, rot: 0 },
+      anchor: clampBox({ x: p.x - w / 2, y: p.y - h / 2, w, h }),
+    });
+  }
+
+  _img(src) {
+    let img = this._imgs.get(src);
+    if (!img) { img = new Image(); img.src = src; this._imgs.set(src, img); }
+    return img;
+  }
+
+  _bindDrop() {
+    const c = this.canvas;
+    c.addEventListener("dragover", (e) => {
+      if (e.dataTransfer.types.includes("application/x-tool")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }
+    });
+    c.addEventListener("drop", (e) => {
+      const raw = e.dataTransfer.getData("application/x-tool");
+      if (!raw) return;
+      e.preventDefault();
+      this.addImageAt(JSON.parse(raw), e.clientX, e.clientY);
+    });
+    // Over a tool picture: wheel resizes, Shift+wheel rotates.
+    c.addEventListener("wheel", (e) => {
+      const b = c.getBoundingClientRect();
+      const hit = this._hit(e.clientX - b.left, e.clientY - b.top);
+      if (!hit || hit.kind !== "image") return;
+      e.preventDefault();
+      const up = (e.deltaY || e.deltaX) < 0;
+      if (e.shiftKey) {
+        hit.shape = { ...hit.shape, rot: ((hit.shape.rot || 0) + (up ? -15 : 15) + 360) % 360 };
+      } else {
+        const a = hit.anchor, k = up ? 1.1 : 1 / 1.1;
+        const w = clamp(a.w * k, 0.04, 0.9), h = a.h * (w / a.w);
+        hit.anchor = clampBox({ x: a.x + a.w / 2 - w / 2, y: a.y + a.h / 2 - h / 2, w, h });
+        hit._view = copyBox(hit.anchor);
+      }
+      clearTimeout(hit._wheelTimer);
+      hit._wheelTimer = setTimeout(() => { this.onSnapshotMoment(); this.onCommit("update", hit); }, 250);
+    }, { passive: false });
   }
 
   // ------------------------------------------------------------------ geometry
@@ -335,6 +389,10 @@ export class AnnotationLayer {
     ctx.fillRect(x + 2, y + 2, w, h);
     ctx.fillStyle = color;
     ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = "rgba(0,0,0,0.65)"; // outline keeps light labels readable on bright scenes
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([]);
+    ctx.strokeRect(x, y, w, h);
     ctx.fillStyle = textColorFor(color);
     ctx.textBaseline = "middle";
     ctx.fillText(text, x + padX, y + h / 2 + 1);
@@ -350,7 +408,19 @@ export class AnnotationLayer {
     ctx.globalAlpha = a.status === "lost" ? 0.4 : 1;
     a._labelRect = null;
 
-    if (a.kind === "ring") {
+    if (a.kind === "image") {
+      const img = this._img(a.shape.src);
+      if (img.complete && img.naturalWidth) {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(((a.shape.rot || 0) * Math.PI) / 180);
+        ctx.shadowColor = "rgba(0,0,0,0.6)"; // lifts the tool off the scene behind it
+        ctx.shadowBlur = 10;
+        ctx.drawImage(img, -w / 2, -h / 2, w, h);
+        ctx.restore();
+      }
+      if (a.label) a._labelRect = this._label(a.label, cx, y + h + clamp(r.w / 55, 12, 20), a.color, r);
+    } else if (a.kind === "ring") {
       this._stroke(() => { ctx.beginPath(); ctx.ellipse(cx, cy, w * 0.58, h * 0.58, 0, 0, Math.PI * 2); }, a.color, lw, [lw * 4, lw * 3]);
     } else if (a.kind === "box") {
       this._stroke(() => { ctx.beginPath(); ctx.rect(x, y, w, h); }, a.color, lw, [lw * 4, lw * 3]);

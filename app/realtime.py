@@ -11,6 +11,7 @@ Messages (JSON text frames)
     {type:"ann_clear"}
     {type:"ptz", action, value}     move|home|zoom|preset
     {type:"meta", ...}              technician shares camera info (resolution, fps, zoom caps)
+    {type:"media", cam, mic}        expert camera/microphone state
     {type:"end"}                    expert ends the session
   server -> client
     {type:"state", annotations, mode, presets, peers, tracking_source}
@@ -63,6 +64,7 @@ class Room:
     tracking: RoomTracking = field(default_factory=RoomTracking)
     frame_source: Peer | None = None
     meta: dict = field(default_factory=dict)
+    media: dict = field(default_factory=dict)  # expert name -> {cam, mic}
 
     def roster(self) -> list[dict]:
         return [{"name": p.name, "role": p.role} for p in self.peers]
@@ -108,6 +110,7 @@ class Hub:
             "presets": ptz.preset_names(room.code),
             "peers": room.roster(),
             "meta": room.meta,
+            "media": [{"name": n, **m} for n, m in room.media.items()],
             "tracking_source": peer is room.frame_source,
         })
         await room.broadcast({"type": "presence", "peers": room.roster()}, exclude=peer)
@@ -134,6 +137,8 @@ class Hub:
             if peer in room.peers:
                 room.peers.remove(peer)
             db.log_event(room.session_id, "leave", {"role": peer.role, "name": peer.name})
+            if peer.role == "expert" and room.media.pop(peer.name, None) is not None:
+                await room.broadcast({"type": "media", "name": peer.name, "cam": False, "mic": False})
             if room.peers:
                 await self._elect_frame_source(room)
                 await room.broadcast({"type": "presence", "peers": room.roster()})
@@ -215,6 +220,12 @@ class Hub:
         elif t == "meta" and peer.role == "technician":
             room.meta = {k: data[k] for k in ("width", "height", "fps", "zoom", "device") if k in data}
             await room.broadcast({"type": "meta", **room.meta}, exclude=peer)
+
+        elif t == "media" and peer.role == "expert":
+            # Expert camera/mic on-off, so technicians can show or hide the expert thumbnail.
+            state = {"cam": bool(data.get("cam")), "mic": bool(data.get("mic"))}
+            room.media[peer.name] = state
+            await room.broadcast({"type": "media", "name": peer.name, **state}, exclude=peer)
 
         elif t == "end" and peer.role == "expert":
             db.log_event(room.session_id, "end", {"by": peer.name})

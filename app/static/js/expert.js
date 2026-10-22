@@ -3,6 +3,7 @@ import { LocalSession } from "./local-webrtc.js";
 import { JitsiSession, summarizeStats } from "./jitsi-client.js";
 import { AnnotationLayer } from "./annotations.js";
 import { FrameSampler } from "./frame-sampler.js";
+import { attachAudio, detachAudio, onAudioBlocked, unlockAudio } from "./audio.js";
 
 const RC = window.RC; // {room, role, name, mode, presets}
 const $ = (sel) => document.querySelector(sel);
@@ -123,20 +124,16 @@ async function startCall() {
       $("#live").textContent = "\u25CF LIVE";
     },
     onFailed: (msg) => { $("#stage-empty").hidden = false; $("#stage-empty").innerHTML = `<div><strong>Call not connected</strong>${msg}</div>`; },
+    onMediaError: () => setMicUi(),
     onRemoteTrack: (t) => {
-      if (t.getType() === "audio") {
-        const el = document.createElement("audio");
-        el.autoplay = true; el.dataset.pid = t.getParticipantId();
-        document.body.appendChild(el);
-        t.attach(el);
-        return;
-      }
+      if (t.getType() === "audio") return attachAudio(t);
+      if (expertNames.includes(session.nameOf(t.getParticipantId()))) return; // another expert's camera
       remoteVideos.set(t.getParticipantId(), t);
       refreshSourceList();
       if (!currentPid || !remoteVideos.has(currentPid)) setSource(t.getParticipantId());
     },
     onRemoteTrackRemoved: (t) => {
-      if (t.getType() === "audio") { document.querySelectorAll(`audio[data-pid="${t.getParticipantId()}"]`).forEach((e) => e.remove()); return; }
+      if (t.getType() === "audio") return detachAudio(t);
       if (remoteVideos.get(t.getParticipantId()) !== t) return;
       remoteVideos.delete(t.getParticipantId());
       refreshSourceList();
@@ -159,19 +156,113 @@ async function startCall() {
       $("#live").classList.toggle("rec", on);
     },
   });
-  await session.start({ audio: true, video: false });
+  // optional: join even without a working mic, so the expert can still watch and guide.
+  await session.start({ audio: true, video: false, optional: true });
+  setMicUi();
+  sendMedia();
 }
+
+// ---------------------------------------------------------------- expert mic + camera
+function sendMedia() {
+  const a = session?.localAudio;
+  socket.send({ type: "media", cam: !!session?.localVideo, mic: !!a && !a.isMuted() });
+}
+socket.on("open", () => sendMedia()); // the server forgets media state when the socket drops
+
+function setMicUi() {
+  const btn = $("#mute"), a = session?.localAudio;
+  btn.setAttribute("aria-pressed", String(!a || a.isMuted()));
+  btn.textContent = !a ? "Enable mic" : a.isMuted() ? "Unmute" : "Mute";
+  btn.title = !a ? "Microphone is off or blocked. Click to allow it." : "";
+}
+
+onAudioBlocked(() => toast("Click anywhere on the page to hear the technician"));
+document.addEventListener("click", () => unlockAudio(), { once: true });
 
 if (!window.isSecureContext) {
   $("#stage-empty").innerHTML = `<div><strong>Microphone needs a secure (https) link</strong>
     Open this page via https://localhost or start the app with python scripts/run_https.py.</div>`;
 } else startCall().catch((e) => console.error(e));
 
-$("#mute").addEventListener("click", async (e) => {
-  const muted = await session?.toggleMute();
-  e.currentTarget.setAttribute("aria-pressed", String(!!muted));
-  e.currentTarget.textContent = muted ? "Unmute" : "Mute";
+$("#mute").addEventListener("click", async () => {
+  if (!session) return;
+  try {
+    if (!session.localAudio) { await session.enableMic(); toast("Microphone on"); }
+    else await session.toggleMute();
+  } catch (err) {
+    toast(err?.name === "NotAllowedError"
+      ? "Microphone is blocked. Allow it from the icon left of the address bar, then click again."
+      : `No microphone found (${err?.message || err?.name || err}).`);
+  }
+  setMicUi();
+  sendMedia();
 });
+
+$("#cam").addEventListener("click", async (e) => {
+  if (!session) return;
+  const btn = e.currentTarget, turnOn = !session.localVideo;
+  try {
+    const t = await session.setCamera(turnOn);
+    if (t) t.attach($("#self-view"));
+    $("#self-view-wrap").hidden = !t;
+    btn.setAttribute("aria-pressed", String(!!t));
+    btn.textContent = t ? "Camera off" : "Camera";
+  } catch (err) {
+    toast(err?.name === "NotAllowedError"
+      ? "Camera is blocked. Allow it from the icon left of the address bar, then click again."
+      : `Could not start the camera (${err?.message || err?.name || err}).`);
+  }
+  sendMedia();
+});
+
+// ---------------------------------------------------------------- tool images
+async function loadTools() {
+  const list = await (await fetch("/api/tools")).json();
+  const box = $("#tool-items");
+  box.innerHTML = "";
+  if (!list.length) { box.innerHTML = `<span class="muted">No tool images yet. Upload a PNG with a transparent background.</span>`; return; }
+  for (const tool of list) {
+    const item = document.createElement("div");
+    item.className = "tool-item";
+    item.innerHTML = `<button class="tool-place" draggable="true" title="Drag onto the video, or click to place"><img alt=""><span></span></button><button class="tool-del" aria-label="Delete">&times;</button>`;
+    const place = item.querySelector(".tool-place"), img = item.querySelector("img");
+    img.src = tool.url;
+    item.querySelector("span").textContent = tool.name;
+    item.querySelector(".tool-del").setAttribute("aria-label", `Delete ${tool.name}`);
+    const payload = JSON.stringify({ url: tool.url, name: tool.name, w: tool.w, h: tool.h });
+    place.addEventListener("dragstart", (ev) => {
+      ev.dataTransfer.setData("application/x-tool", payload);
+      ev.dataTransfer.effectAllowed = "copy";
+      ev.dataTransfer.setDragImage(img, img.width / 2, img.height / 2);
+    });
+    place.addEventListener("click", () => {
+      if (!video.srcObject) return toast("Wait for the technician's video first");
+      layer.addImageAt(JSON.parse(payload));
+    });
+    item.querySelector(".tool-del").addEventListener("click", async () => {
+      if (!confirm(`Remove "${tool.name}" from the tool library?`)) return;
+      await fetch(`/api/tools/${tool.id}`, { method: "DELETE" });
+      loadTools();
+    });
+    box.appendChild(item);
+  }
+}
+
+$("#tool-upload").addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  for (const file of files) {
+    const name = file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
+    const res = await fetch(`/api/tools?${new URLSearchParams({ name })}`, {
+      method: "POST", body: file, headers: { "Content-Type": file.type || "application/octet-stream" },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast(`${file.name}: ${data.detail || "upload failed"}`); continue; }
+    if (!data.transparent) toast(`${data.name} has no transparent background. A transparent PNG looks cleaner on video.`);
+  }
+  loadTools();
+});
+loadTools();
 $("#record").addEventListener("click", async (e) => {
   const btn = e.currentTarget;
   try {
@@ -200,7 +291,9 @@ $("#copy-link").addEventListener("click", async () => {
   catch { prompt("Send this link to the technician:", link); }
 });
 
+let expertNames = [];
 function updatePeers(peers) {
+  expertNames = peers.filter((p) => p.role === "expert").map((p) => p.name);
   const techs = peers.filter((p) => p.role === "technician").map((p) => p.name);
   if (!layer.source) $("#cap-tech").textContent = techs.length ? `Technician: ${techs.join(", ")}` : "Technician: waiting";
 }

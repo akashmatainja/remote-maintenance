@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import db, ptz
+from . import db, ptz, tools
 from .config import settings
 from .jitsi_auth import make_token
 from .realtime import hub
@@ -30,6 +30,8 @@ async def lifespan(_app):
 
 app = FastAPI(title="Expert Guided Remote Maintenance", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
+settings.tools_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/tool-images", StaticFiles(directory=settings.tools_dir), name="tool-images")
 templates = Jinja2Templates(directory=APP_DIR / "templates")
 
 ROOM_ALPHABET = "".join(c for c in string.ascii_uppercase + string.digits if c not in "O0I1")
@@ -100,6 +102,35 @@ def placeholder(request: Request, page: str):
 
 
 # ---------------------------------------------------------------------------- API
+@app.get("/api/tools")
+def list_tools():
+    return tools.list_tools()
+
+
+@app.post("/api/tools")
+async def upload_tool(request: Request, name: str = ""):
+    """Raw image bytes in the body (no multipart), name in the query string."""
+    size = int(request.headers.get("content-length") or 0)
+    if size > tools.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "Image is larger than 5 MB.")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > tools.MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "Image is larger than 5 MB.")
+    try:
+        return tools.add_tool(bytes(body), name)
+    except tools.ToolError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.delete("/api/tools/{tool_id}")
+def delete_tool(tool_id: str):
+    if not tools.delete_tool(tool_id):
+        raise HTTPException(404, "No such tool.")
+    return {"ok": True}
+
+
 @app.get("/api/lan-ip")
 def lan_ip():
     """LAN address of this server, so an expert on localhost can share a link a phone can open."""
